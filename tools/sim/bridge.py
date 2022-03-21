@@ -15,7 +15,8 @@ from lib.can import can_function
 
 import cereal.messaging as messaging
 from cereal import log
-from cereal.visionipc.visionipc_pyx import VisionIpcServer, VisionStreamType  # pylint: disable=no-name-in-module, import-error
+from cereal.visionipc.visionipc_pyx import VisionIpcServer, \
+  VisionStreamType  # pylint: disable=no-name-in-module, import-error
 from common.basedir import BASEDIR
 from common.numpy_fast import clip
 from common.params import Params
@@ -40,8 +41,6 @@ STEER_RATIO = 15.
 pm = messaging.PubMaster(['roadCameraState', 'sensorEvents', 'can', "gpsLocationExternal"])
 sm = messaging.SubMaster(['carControl', 'controlsState'])
 
-def is_timeout(timeout):
-  return timeout > 0 and time.time() - script_start_time > timeout
 
 class VehicleState:
   def __init__(self):
@@ -77,7 +76,7 @@ class Camerad:
     # set up for pyopencl rgb to yuv conversion
     self.ctx = cl.create_some_context()
     self.queue = cl.CommandQueue(self.ctx)
-    cl_arg = f" -DHEIGHT={H} -DWIDTH={W} -DRGB_STRIDE={W*3} -DUV_WIDTH={W // 2} -DUV_HEIGHT={H // 2} -DRGB_SIZE={W * H} -DCL_DEBUG "
+    cl_arg = f" -DHEIGHT={H} -DWIDTH={W} -DRGB_STRIDE={W * 3} -DUV_WIDTH={W // 2} -DUV_HEIGHT={H // 2} -DRGB_SIZE={W * H} -DCL_DEBUG "
 
     # TODO: move rgb_to_yuv.cl to local dir once the frame stream camera is removed
     kernel_fn = os.path.join(BASEDIR, "selfdrive", "camerad", "transforms", "rgb_to_yuv.cl")
@@ -218,14 +217,22 @@ def can_function_runner(vs: VehicleState, exit_event: threading.Event):
     i += 1
 
 
-def bridge(q):
-  # setup CARLA
+def is_timeout(timeout):
+  return 0 < timeout < time.time() - script_start_time
+
+
+def start_carla_client():
   client = carla.Client("127.0.0.1", 2000)
   client.set_timeout(5.0)
+  return client
+
+
+def bridge(q):
+  client = start_carla_client()
   world = client.load_world(args.town)
 
   settings = world.get_settings()
-  settings.synchronous_mode = True # Enables synchronous mode
+  settings.synchronous_mode = True  # Enables synchronous mode
   settings.fixed_delta_seconds = 0.05
   world.apply_settings(settings)
 
@@ -416,7 +423,7 @@ def bridge(q):
 
     # --------------Step 3-------------------------------
     vel = vehicle.get_velocity()
-    speed = math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)  # in m/s
+    speed = math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)  # in m/s
     vehicle_state.speed = speed
     vehicle_state.vel = vel
     vehicle_state.angle = steer_out
@@ -424,7 +431,8 @@ def bridge(q):
     vehicle_state.is_engaged = is_openpilot_engaged
 
     if rk.frame % PRINT_DECIMATION == 0:
-      print("frame: ", "engaged:", is_openpilot_engaged, "; throttle: ", round(vc.throttle, 3), "; steer(c/deg): ", round(vc.steer, 3), round(steer_out, 3), "; brake: ", round(vc.brake, 3))
+      print("frame: ", "engaged:", is_openpilot_engaged, "; throttle: ", round(vc.throttle, 3), "; steer(c/deg): ",
+            round(vc.steer, 3), round(steer_out, 3), "; brake: ", round(vc.brake, 3))
 
     if rk.frame % 5 == 0:
       world.tick()
@@ -450,6 +458,7 @@ def bridge_keep_alive(q: Any):
         raise Exception(f"Failed to connect with bridge within {args.timeout} seconds") from e
       print("Restarting bridge...")
 
+
 if __name__ == "__main__":
   # make sure params are in a good state
   set_params_enabled()
@@ -466,9 +475,11 @@ if __name__ == "__main__":
   if args.joystick:
     # start input poll for joystick
     from lib.manual_ctrl import wheel_poll_thread
+
     wheel_poll_thread(q)
     p.join()
   else:
     # start input poll for keyboard
     from lib.keyboard_ctrl import keyboard_poll_thread
+
     keyboard_poll_thread(q)
